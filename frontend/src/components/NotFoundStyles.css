@@ -1,4 +1,33 @@
+.not-found {
+  text-align: center;
+  padding: var(--spacing-xl) var(--spacing-md);
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.not-found h1 {
+  font-size: 4rem;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-lg);
+  font-weight: 700;
+  letter-spacing: -2px;
+}
+
 .coyote-404 {
   width: 50%;
+  max-width: 400px;
   height: auto;
+  margin: var(--spacing-lg) 0;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+@media (max-width: 768px) {
+  .not-found h1 {
+    font-size: 3rem;
+  }
+  
+  .coyote-404 {
+    width: 80%;
+  }
 }
