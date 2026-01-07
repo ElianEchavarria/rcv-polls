@@ -52,6 +52,9 @@ const runApp = async () => {
   }
 };
 
-runApp();
+// Only run the app if not in test mode
+if (process.env.NODE_ENV !== "test" && require.main === module) {
+  runApp();
+}
 
 module.exports = app;

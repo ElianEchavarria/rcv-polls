@@ -2,6 +2,131 @@ const express = require("express");
 const router = express.Router();
 const { Poll, PollOption, Ballot, Ranking, User, db } = require("../database");
 const { authenticateJWT } = require("../auth");
+const { calculateIRV } = require("../utils/irv");
+
+// PUBLIC ROUTES (no authentication required) - Must come before parameterized routes!
+
+// GET /api/polls/public/:shareLink - Get poll by share link (for voting)
+router.get("/public/:shareLink", async (req, res) => {
+  try {
+    const poll = await Poll.findOne({
+      where: {
+        shareLink: req.params.shareLink,
+        status: "published",
+      },
+      include: [
+        {
+          model: PollOption,
+          as: "options",
+          attributes: ["id", "text"],
+        },
+      ],
+    });
+
+    if (!poll) {
+      return res.status(404).json({ error: "Poll not found or no longer accepting votes" });
+    }
+
+    // Sort options by ID
+    if (poll.options) {
+      poll.options.sort((a, b) => a.id - b.id);
+    }
+
+    res.json(poll);
+  } catch (error) {
+    console.error("Error fetching public poll:", error);
+    res.status(500).json({ error: "Failed to fetch poll" });
+  }
+});
+
+// POST /api/polls/public/:shareLink/vote - Submit a vote (no authentication required)
+router.post("/public/:shareLink/vote", async (req, res) => {
+  try {
+    const { voterName, voterEmail, rankings } = req.body;
+
+    // Find the poll
+    const poll = await Poll.findOne({
+      where: {
+        shareLink: req.params.shareLink,
+        status: "published",
+      },
+      include: [
+        {
+          model: PollOption,
+          as: "options",
+        },
+      ],
+    });
+
+    if (!poll) {
+      return res.status(404).json({ error: "Poll not found or no longer accepting votes" });
+    }
+
+    // Validate rankings
+    if (!rankings || !Array.isArray(rankings) || rankings.length !== poll.options.length) {
+      return res.status(400).json({ error: "All options must be ranked" });
+    }
+
+    // Validate that each option is ranked exactly once
+    const optionIds = poll.options.map((opt) => opt.id);
+    const rankedOptionIds = rankings.map((r) => r.pollOptionId);
+    const uniqueRankedIds = [...new Set(rankedOptionIds)];
+
+    if (uniqueRankedIds.length !== optionIds.length) {
+      return res.status(400).json({ error: "Each option must be ranked exactly once" });
+    }
+
+    // Validate that all option IDs are valid
+    for (const ranking of rankings) {
+      if (!optionIds.includes(ranking.pollOptionId)) {
+        return res.status(400).json({ error: "Invalid option ID" });
+      }
+    }
+
+    // Validate rankings are sequential (1, 2, 3, ...)
+    const ranks = rankings.map((r) => r.rank).sort((a, b) => a - b);
+    for (let i = 0; i < ranks.length; i++) {
+      if (ranks[i] !== i + 1) {
+        return res.status(400).json({ error: "Rankings must be sequential (1, 2, 3, etc.)" });
+      }
+    }
+
+    // Create ballot and rankings in a transaction
+    const ballot = await db.transaction(async (t) => {
+      const newBallot = await Ballot.create(
+        {
+          pollId: poll.id,
+          voterName: voterName?.trim() || null,
+          voterEmail: voterEmail?.trim() || null,
+        },
+        { transaction: t }
+      );
+
+      // Create rankings
+      await Promise.all(
+        rankings.map((ranking) =>
+          Ranking.create(
+            {
+              ballotId: newBallot.id,
+              pollOptionId: ranking.pollOptionId,
+              rank: ranking.rank,
+            },
+            { transaction: t }
+          )
+        )
+      );
+
+      return newBallot;
+    });
+
+    res.status(201).json({ message: "Vote submitted successfully", ballotId: ballot.id });
+  } catch (error) {
+    console.error("Error submitting vote:", error);
+    res.status(500).json({ error: "Failed to submit vote" });
+  }
+});
+
+// PROTECTED ROUTES (authentication required)
 
 // GET /api/polls - Get all polls for the authenticated user
 router.get("/", authenticateJWT, async (req, res) => {
@@ -238,7 +363,7 @@ router.post("/:id/close", authenticateJWT, async (req, res) => {
   }
 });
 
-// GET /api/polls/:id/results - Get poll results (only if user is creator)
+// GET /api/polls/:id/results - Get poll results with IRV calculation (only if user is creator)
 router.get("/:id/results", authenticateJWT, async (req, res) => {
   try {
     const poll = await Poll.findOne({
@@ -276,132 +401,31 @@ router.get("/:id/results", authenticateJWT, async (req, res) => {
       return res.status(404).json({ error: "Poll not found" });
     }
 
-    res.json(poll);
+    // Sort options and rankings for consistent processing
+    const sortedOptions = [...poll.options].sort((a, b) => a.id - b.id);
+    const sortedBallots = poll.ballots.map((ballot) => ({
+      ...ballot.toJSON(),
+      rankings: [...ballot.rankings].sort((a, b) => a.rank - b.rank),
+    }));
+
+    // Calculate IRV results
+    const irvResults = calculateIRV(sortedOptions, sortedBallots);
+
+    // Return poll data with calculated results
+    res.json({
+      poll: {
+        id: poll.id,
+        title: poll.title,
+        description: poll.description,
+        status: poll.status,
+        options: sortedOptions,
+        ballotCount: poll.ballots.length,
+      },
+      results: irvResults,
+    });
   } catch (error) {
     console.error("Error fetching poll results:", error);
     res.status(500).json({ error: "Failed to fetch poll results" });
-  }
-});
-
-// PUBLIC ROUTES (no authentication required)
-
-// GET /api/polls/public/:shareLink - Get poll by share link (for voting)
-router.get("/public/:shareLink", async (req, res) => {
-  try {
-    const poll = await Poll.findOne({
-      where: {
-        shareLink: req.params.shareLink,
-        status: "published",
-      },
-      include: [
-        {
-          model: PollOption,
-          as: "options",
-          attributes: ["id", "text"],
-        },
-      ],
-    });
-
-    if (!poll) {
-      return res.status(404).json({ error: "Poll not found or no longer accepting votes" });
-    }
-
-    // Sort options by ID
-    if (poll.options) {
-      poll.options.sort((a, b) => a.id - b.id);
-    }
-
-    res.json(poll);
-  } catch (error) {
-    console.error("Error fetching public poll:", error);
-    res.status(500).json({ error: "Failed to fetch poll" });
-  }
-});
-
-// POST /api/polls/public/:shareLink/vote - Submit a vote (no authentication required)
-router.post("/public/:shareLink/vote", async (req, res) => {
-  try {
-    const { voterName, voterEmail, rankings } = req.body;
-
-    // Find the poll
-    const poll = await Poll.findOne({
-      where: {
-        shareLink: req.params.shareLink,
-        status: "published",
-      },
-      include: [
-        {
-          model: PollOption,
-          as: "options",
-        },
-      ],
-    });
-
-    if (!poll) {
-      return res.status(404).json({ error: "Poll not found or no longer accepting votes" });
-    }
-
-    // Validate rankings
-    if (!rankings || !Array.isArray(rankings) || rankings.length !== poll.options.length) {
-      return res.status(400).json({ error: "All options must be ranked" });
-    }
-
-    // Validate that each option is ranked exactly once
-    const optionIds = poll.options.map((opt) => opt.id);
-    const rankedOptionIds = rankings.map((r) => r.pollOptionId);
-    const uniqueRankedIds = [...new Set(rankedOptionIds)];
-
-    if (uniqueRankedIds.length !== optionIds.length) {
-      return res.status(400).json({ error: "Each option must be ranked exactly once" });
-    }
-
-    // Validate that all option IDs are valid
-    for (const ranking of rankings) {
-      if (!optionIds.includes(ranking.pollOptionId)) {
-        return res.status(400).json({ error: "Invalid option ID" });
-      }
-    }
-
-    // Validate rankings are sequential (1, 2, 3, ...)
-    const ranks = rankings.map((r) => r.rank).sort((a, b) => a - b);
-    for (let i = 0; i < ranks.length; i++) {
-      if (ranks[i] !== i + 1) {
-        return res.status(400).json({ error: "Rankings must be sequential (1, 2, 3, etc.)" });
-      }
-    }
-
-    // Create ballot and rankings in a transaction
-    const ballot = await db.transaction(async (t) => {
-      const newBallot = await Ballot.create(
-        {
-          pollId: poll.id,
-          voterName: voterName?.trim() || null,
-          voterEmail: voterEmail?.trim() || null,
-        },
-        { transaction: t }
-      );
-
-      // Create rankings
-      await Promise.all(
-        rankings.map((ranking) =>
-          Ranking.create(
-            {
-              ballotId: newBallot.id,
-              pollOptionId: ranking.pollOptionId,
-              rank: ranking.rank,
-            },
-            { transaction: t }
-          )
-        )
-      );
-
-      return newBallot;
-    });
-
-    res.status(201).json({ message: "Vote submitted successfully", ballotId: ballot.id });
-  } catch (error) {
-    console.error("Error submitting vote:", error);
-    res.status(500).json({ error: "Failed to submit vote" });
   }
 });
 

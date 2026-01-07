@@ -21,12 +21,11 @@ const PollResults = ({ user }) => {
   const fetchPollAndResults = async () => {
     try {
       setLoading(true);
-      const [pollResponse, resultsResponse] = await Promise.all([
-        axios.get(`${API_URL}/api/polls/${id}`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/polls/${id}/results`, { withCredentials: true }),
-      ]);
-      setPoll(pollResponse.data);
-      setResults(resultsResponse.data);
+      const response = await axios.get(`${API_URL}/api/polls/${id}/results`, {
+        withCredentials: true,
+      });
+      setPoll(response.data.poll);
+      setResults(response.data.results);
       setError(null);
     } catch (err) {
       console.error("Error fetching poll results:", err);
@@ -34,66 +33,6 @@ const PollResults = ({ user }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Calculate instant runoff results
-  const calculateResults = () => {
-    if (!poll || !poll.ballots || poll.ballots.length === 0) {
-      return null;
-    }
-
-    const rounds = [];
-    let remainingOptions = [...poll.options];
-    let ballots = poll.ballots.map((ballot) => ({
-      id: ballot.id,
-      rankings: ballot.rankings.map((r) => ({
-        pollOptionId: r.pollOption.id,
-        rank: r.rank,
-      })),
-    }));
-
-    while (remainingOptions.length > 1) {
-      // Count first-choice votes for remaining options
-      const voteCounts = {};
-      remainingOptions.forEach((option) => {
-        voteCounts[option.id] = 0;
-      });
-
-      ballots.forEach((ballot) => {
-        // Find the highest-ranked option that's still in the race
-        const sortedRankings = [...ballot.rankings].sort((a, b) => a.rank - b.rank);
-        for (const ranking of sortedRankings) {
-          if (remainingOptions.some((opt) => opt.id === ranking.pollOptionId)) {
-            voteCounts[ranking.pollOptionId]++;
-            break;
-          }
-        }
-      });
-
-      // Find the option with the fewest votes
-      const totalVotes = Object.values(voteCounts).reduce((sum, count) => sum + count, 0);
-      const percentages = {};
-      remainingOptions.forEach((option) => {
-        percentages[option.id] = totalVotes > 0 ? (voteCounts[option.id] / totalVotes) * 100 : 0;
-      });
-
-      const minVotes = Math.min(...Object.values(voteCounts));
-      const eliminatedOption = remainingOptions.find((opt) => voteCounts[opt.id] === minVotes);
-
-      rounds.push({
-        round: rounds.length + 1,
-        voteCounts: { ...voteCounts },
-        percentages: { ...percentages },
-        eliminated: eliminatedOption,
-        remaining: remainingOptions.map((opt) => opt.id),
-      });
-
-      // Remove eliminated option
-      remainingOptions = remainingOptions.filter((opt) => opt.id !== eliminatedOption.id);
-    }
-
-    const winner = remainingOptions[0];
-    return { rounds, winner };
   };
 
   if (!user) {
@@ -125,8 +64,7 @@ const PollResults = ({ user }) => {
     );
   }
 
-  const calculatedResults = calculateResults();
-  const hasVotes = poll.ballots && poll.ballots.length > 0;
+  const hasVotes = poll && results && results.totalVotes > 0;
 
   return (
     <div className="poll-results">
@@ -142,39 +80,82 @@ const PollResults = ({ user }) => {
           <div className="no-votes">
             <p>No votes have been cast yet.</p>
           </div>
+        ) : results.error ? (
+          <div className="error">
+            <p>{results.error}</p>
+          </div>
         ) : (
           <>
             <div className="results-summary">
               <div className="summary-item">
-                <strong>{poll.ballots.length}</strong>
+                <strong>{results.totalVotes}</strong>
                 <span>Total Votes</span>
               </div>
               <div className="summary-item">
                 <strong>{poll.options.length}</strong>
                 <span>Options</span>
               </div>
+              <div className="summary-item">
+                <strong>{results.majorityThreshold}</strong>
+                <span>Majority Needed</span>
+              </div>
             </div>
 
-            {calculatedResults && (
+            {results.tie ? (
+              <div className="winner-section">
+                <h2>Tie Result</h2>
+                <div className="winner-card">
+                  <div className="winner-name">No Clear Winner</div>
+                  <div className="winner-label">
+                    The following options are tied:
+                  </div>
+                  <ul style={{ marginTop: "20px", textAlign: "left", display: "inline-block" }}>
+                    {results.tiedOptions.map((opt) => (
+                      <li key={opt.id} style={{ margin: "10px 0", fontSize: "1.2rem" }}>
+                        {opt.text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : results.winner ? (
               <>
                 <div className="winner-section">
                   <h2>Winner</h2>
                   <div className="winner-card">
                     <div className="winner-name">
-                      {poll.options.find((opt) => opt.id === calculatedResults.winner.id)?.text}
+                      {poll.options.find((opt) => opt.id === results.winner.id)?.text}
                     </div>
-                    <div className="winner-label">Selected by Instant Runoff Voting</div>
+                    <div className="winner-label">
+                      Selected by Instant Runoff Voting
+                      {results.rounds.some((r) => r.majorityWinner) && " (Majority Winner)"}
+                    </div>
                   </div>
                 </div>
 
                 <div className="rounds-section">
                   <h2>Voting Rounds</h2>
-                  {calculatedResults.rounds.map((round, index) => (
+                  {results.rounds.map((round) => (
                     <div key={round.round} className="round-card">
                       <h3>Round {round.round}</h3>
+                      {round.majorityWinner && (
+                        <div
+                          style={{
+                            background: "rgba(46, 125, 50, 0.1)",
+                            padding: "10px",
+                            borderRadius: "8px",
+                            marginBottom: "15px",
+                            color: "#2e7d32",
+                            fontWeight: 600,
+                          }}
+                        >
+                          ✓ Majority achieved in this round!
+                        </div>
+                      )}
                       <div className="round-results">
                         {poll.options
                           .filter((opt) => round.remaining.includes(opt.id))
+                          .sort((a, b) => round.voteCounts[b.id] - round.voteCounts[a.id])
                           .map((option) => (
                             <div key={option.id} className="result-item">
                               <div className="result-option">{option.text}</div>
@@ -203,10 +184,22 @@ const PollResults = ({ user }) => {
                           {poll.options.find((opt) => opt.id === round.eliminated.id)?.text}
                         </div>
                       )}
+                      {round.eliminatedMultiple && round.eliminatedMultiple.length > 0 && (
+                        <div className="eliminated">
+                          <strong>Eliminated:</strong>{" "}
+                          {round.eliminatedMultiple
+                            .map((opt) => poll.options.find((o) => o.id === opt.id)?.text)
+                            .join(", ")}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </>
+            ) : (
+              <div className="error">
+                <p>Unable to determine winner</p>
+              </div>
             )}
           </>
         )}
