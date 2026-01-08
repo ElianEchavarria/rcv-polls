@@ -13,6 +13,7 @@ router.get("/public", async (req, res) => {
       where: {
         status: "published",
       },
+      attributes: ["id", "title", "description", "status", "shareLink", "createdAt", "updatedAt"],
       include: [
         {
           model: PollOption,

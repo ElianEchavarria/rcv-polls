@@ -15,18 +15,36 @@ const VotePoll = () => {
   const [voterEmail, setVoterEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Debug logs
+  console.log("=== VotePoll Component ===");
+  console.log("Component mounted:", new Date().toLocaleTimeString());
+  console.log("API_URL:", API_URL);
+  console.log("shareLink from URL:", shareLink);
+
   useEffect(() => {
-    fetchPoll();
+    console.log("useEffect triggered, shareLink:", shareLink);
+    if (shareLink) {
+      fetchPoll();
+    } else {
+      console.warn("No shareLink found in URL params!");
+      setError("No poll link provided");
+      setLoading(false);
+    }
   }, [shareLink]);
 
   const fetchPoll = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_URL}/api/polls/public/${shareLink}`);
+      const fetchUrl = `${API_URL}/api/polls/public/${shareLink}`;
+      console.log(`Fetching from: ${fetchUrl}`);
+      const response = await axios.get(fetchUrl);
+      console.log("Poll data received:", response.data);
       setPoll(response.data);
       setError(null);
     } catch (err) {
       console.error("Error fetching poll:", err);
+      console.error("Error response:", err.response);
+      console.error("Error message:", err.message);
       setError(err.response?.data?.error || "Poll not found or no longer available");
     } finally {
       setLoading(false);
@@ -110,7 +128,12 @@ const VotePoll = () => {
   if (loading) {
     return (
       <div className="vote-poll">
-        <div className="loading">Loading poll...</div>
+        <div className="vote-poll-container">
+          <div className="loading">
+            <div className="spinner"></div>
+            <p>Loading poll...</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -118,22 +141,41 @@ const VotePoll = () => {
   if (error && !poll) {
     return (
       <div className="vote-poll">
-        <div className="error">{error}</div>
+        <div className="vote-poll-container">
+          <div className="error-message">
+            <h2>Error</h2>
+            <p>{error}</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!poll) {
-    return null;
+    return (
+      <div className="vote-poll">
+        <div className="vote-poll-container">
+          <div className="error-message">
+            <h2>Poll Not Found</h2>
+            <p>The poll you're looking for doesn't exist or has been deleted.</p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (poll.status !== "published") {
     return (
       <div className="vote-poll">
-        <div className="error">
-          {poll.status === "closed"
-            ? "This poll has been closed and is no longer accepting votes."
-            : "This poll is not yet published."}
+        <div className="vote-poll-container">
+          <div className="error-message">
+            <h2>Poll Unavailable</h2>
+            <p>
+              {poll.status === "closed"
+                ? "This poll has been closed and is no longer accepting votes."
+                : "This poll is not yet published."}
+            </p>
+          </div>
         </div>
       </div>
     );

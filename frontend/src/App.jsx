@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import axios from "axios";
 import "./AppStyles.css";
 import NavBar from "./components/NavBar";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Login from "./components/Login";
 import Signup from "./components/Signup";
@@ -65,19 +66,21 @@ const App = () => {
   return (
     <div>
       <NavBar user={user} onLogout={handleLogout} />
-      <div className="app">
-        <Routes>
-          <Route path="/login" element={<Login setUser={setUser} />} />
-          <Route path="/signup" element={<Signup setUser={setUser} />} />
-          <Route exact path="/" element={<PollList user={user} />} />
-          <Route path="/polls/create" element={<CreatePoll user={user} />} />
-          <Route path="/polls/:id" element={<PollDetail user={user} />} />
-          <Route path="/polls/:id/results" element={<PollResults user={user} />} />
-          <Route path="/discover" element={<DiscoverPolls />} />
-          <Route path="/vote/:shareLink" element={<VotePoll />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </div>
+      <ErrorBoundary>
+        <div className="app">
+          <Routes>
+            <Route path="/login" element={<Login setUser={setUser} />} />
+            <Route path="/signup" element={<Signup setUser={setUser} />} />
+            <Route exact path="/" element={<PollList user={user} />} />
+            <Route path="/polls/create" element={<CreatePoll user={user} />} />
+            <Route path="/polls/:id" element={<PollDetail user={user} />} />
+            <Route path="/polls/:id/results" element={<PollResults user={user} />} />
+            <Route path="/discover" element={<DiscoverPolls />} />
+            <Route path="/vote/:shareLink" element={<VotePoll />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </div>
+      </ErrorBoundary>
     </div>
   );
 };
