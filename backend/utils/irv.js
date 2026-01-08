@@ -54,7 +54,7 @@ function calculateIRV(options, ballots) {
   const totalVotes = normalizedBallots.length;
   const majorityThreshold = Math.floor(totalVotes / 2) + 1;
 
-  // Continue until we have a winner
+  // Continue until we have a winner or one option remains
   while (remainingOptions.length > 1) {
     // Count first-choice votes for remaining options
     const voteCounts = {};
@@ -80,10 +80,10 @@ function calculateIRV(options, ballots) {
         totalVotes > 0 ? (voteCounts[option.id] / totalVotes) * 100 : 0;
     });
 
-    // Check for majority winner
-    const majorityWinner = remainingOptions.find(
-      (opt) => voteCounts[opt.id] >= majorityThreshold
-    );
+    // Check for majority winner (only matters with 3+ options)
+    const majorityWinner = remainingOptions.length > 2
+      ? remainingOptions.find((opt) => voteCounts[opt.id] >= majorityThreshold)
+      : null;
 
     if (majorityWinner) {
       // We have a majority winner!
@@ -104,14 +104,93 @@ function calculateIRV(options, ballots) {
       };
     }
 
+    // If only 2 options remain, the one with fewer votes loses
+    if (remainingOptions.length === 2) {
+      const voteValues = Object.values(voteCounts);
+      const minVotes = Math.min(...voteValues);
+
+      // Check for tie with 2 options
+      if (voteValues[0] === voteValues[1]) {
+        rounds.push({
+          round: rounds.length + 1,
+          voteCounts: { ...voteCounts },
+          percentages: { ...percentages },
+          eliminated: null,
+          remaining: remainingOptions.map((opt) => opt.id),
+          tie: true,
+        });
+
+        return {
+          rounds,
+          winner: null,
+          tie: true,
+          tiedOptions: remainingOptions,
+          totalVotes,
+          majorityThreshold,
+        };
+      }
+
+      // One option has fewer votes, eliminate it
+      const eliminatedOption = remainingOptions.find(
+        (opt) => voteCounts[opt.id] === minVotes
+      );
+
+      rounds.push({
+        round: rounds.length + 1,
+        voteCounts: { ...voteCounts },
+        percentages: { ...percentages },
+        eliminated: eliminatedOption,
+        remaining: remainingOptions.map((opt) => opt.id),
+      });
+
+      // Return the winner (the other option)
+      const winner = remainingOptions.find(
+        (opt) => opt.id !== eliminatedOption.id
+      );
+
+      return {
+        rounds,
+        winner,
+        totalVotes,
+        majorityThreshold,
+      };
+    }
+
     // Find the option(s) with the fewest votes
     const voteValues = Object.values(voteCounts);
     const minVotes = Math.min(...voteValues);
 
-    // Handle ties - if all remaining options have the same votes, it's a tie
+    // Find all options with minimum votes
+    const minVoteOptions = remainingOptions.filter(
+      (opt) => voteCounts[opt.id] === minVotes
+    );
+
+    // Handle complete ties - if all remaining options have the same votes
     const allSame = voteValues.every((count) => count === minVotes);
-    if (allSame && remainingOptions.length > 1) {
-      // It's a tie - return the remaining options
+    if (allSame && remainingOptions.length > 2) {
+      // For a complete tie with 3+ candidates, eliminate the one with lowest ID (tie-breaking)
+      const optionToEliminate = minVoteOptions.reduce((lowest, current) =>
+        current.id < lowest.id ? current : lowest
+      );
+
+      rounds.push({
+        round: rounds.length + 1,
+        voteCounts: { ...voteCounts },
+        percentages: { ...percentages },
+        eliminated: optionToEliminate,
+        remaining: remainingOptions.map((opt) => opt.id),
+      });
+
+      // Remove eliminated option
+      remainingOptions = remainingOptions.filter(
+        (opt) => opt.id !== optionToEliminate.id
+      );
+
+      continue; // Go to next round
+    }
+
+    // If only 2 options and they have equal votes, it's a tie
+    if (remainingOptions.length === 2 && allSame) {
       rounds.push({
         round: rounds.length + 1,
         voteCounts: { ...voteCounts },
@@ -131,14 +210,8 @@ function calculateIRV(options, ballots) {
       };
     }
 
-    // Find all options with minimum votes (for tie-breaking if needed)
-    const minVoteOptions = remainingOptions.filter(
-      (opt) => voteCounts[opt.id] === minVotes
-    );
-
-    // If multiple options have the same minimum, eliminate all of them
-    // (This is a common IRV variant - eliminates all tied last-place candidates)
-    const eliminatedOptions = minVoteOptions;
+    // If multiple options tied for last place, eliminate all of them
+    const eliminatedOptions = minVoteOptions.length > 1 ? minVoteOptions : [minVoteOptions[0]];
 
     // Store round data
     rounds.push({
@@ -146,7 +219,7 @@ function calculateIRV(options, ballots) {
       voteCounts: { ...voteCounts },
       percentages: { ...percentages },
       eliminated: eliminatedOptions.length === 1 ? eliminatedOptions[0] : null,
-      eliminatedMultiple: eliminatedOptions.length > 1 ? eliminatedOptions : null,
+      eliminatedMultiple: eliminatedOptions.length > 1 ? eliminatedOptions : undefined,
       remaining: remainingOptions.map((opt) => opt.id),
     });
 

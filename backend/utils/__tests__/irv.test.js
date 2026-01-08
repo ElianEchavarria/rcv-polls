@@ -103,21 +103,21 @@ describe("IRV Algorithm", () => {
         { id: 2, text: "Option B" },
         { id: 3, text: "Option C" },
       ];
-      // Round 1: A=1, B=1, C=3 (C eliminated)
-      // Round 2: A gets C's votes (A=4), B=1 (B eliminated)
+      // Round 1: A=2, B=0, C=2 (eliminate B with 0 votes)
+      // Round 2: A=3 (gets B's redistributed votes), C=2 (A wins with majority)
       const ballots = [
         { id: 1, rankings: [{ pollOptionId: 1, rank: 1 }, { pollOptionId: 3, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
         { id: 2, rankings: [{ pollOptionId: 1, rank: 1 }, { pollOptionId: 3, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
-        { id: 3, rankings: [{ pollOptionId: 1, rank: 1 }, { pollOptionId: 3, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
-        { id: 4, rankings: [{ pollOptionId: 1, rank: 1 }, { pollOptionId: 3, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
-        { id: 5, rankings: [{ pollOptionId: 3, rank: 1 }, { pollOptionId: 1, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
+        { id: 3, rankings: [{ pollOptionId: 3, rank: 1 }, { pollOptionId: 1, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
+        { id: 4, rankings: [{ pollOptionId: 3, rank: 1 }, { pollOptionId: 1, rank: 2 }, { pollOptionId: 2, rank: 3 }] },
+        { id: 5, rankings: [{ pollOptionId: 2, rank: 1 }, { pollOptionId: 1, rank: 2 }, { pollOptionId: 3, rank: 3 }] },
       ];
 
       const result = calculateIRV(options, ballots);
       expect(result.winner.id).toBe(1);
       expect(result.rounds.length).toBe(2);
-      expect(result.rounds[0].eliminated.id).toBe(3);
-      expect(result.rounds[1].eliminated.id).toBe(2);
+      expect(result.rounds[0].eliminated.id).toBe(2);
+      expect(result.rounds[1].eliminated.id).toBe(3);
     });
 
     test("handles three-round elimination", () => {
@@ -216,7 +216,7 @@ describe("IRV Algorithm", () => {
       expect(result.majorityThreshold).toBe(6); // floor(10/2) + 1 = 6
       expect(result.winner).toBeTruthy();
       expect(result.rounds.length).toBeGreaterThan(0);
-      
+
       // Verify round structure
       result.rounds.forEach((round) => {
         expect(round.round).toBeGreaterThan(0);
