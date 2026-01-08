@@ -6,6 +6,35 @@ const { calculateIRV } = require("../utils/irv");
 
 // PUBLIC ROUTES (no authentication required) - Must come before parameterized routes!
 
+// GET /api/polls/public - Get all published polls (for discovering)
+router.get("/public", async (req, res) => {
+  try {
+    const polls = await Poll.findAll({
+      where: {
+        status: "published",
+      },
+      include: [
+        {
+          model: PollOption,
+          as: "options",
+          attributes: ["id", "text"],
+        },
+        {
+          model: Ballot,
+          as: "ballots",
+          attributes: ["id"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json(polls);
+  } catch (error) {
+    console.error("Error fetching public polls:", error);
+    res.status(500).json({ error: "Failed to fetch polls" });
+  }
+});
+
 // GET /api/polls/public/:shareLink - Get poll by share link (for voting)
 router.get("/public/:shareLink", async (req, res) => {
   try {
